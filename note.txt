@@ -11,3 +11,8 @@ catatan grpc-gateway
 - sum by (label) -> kalkulasi berdasarkan label
 - count_over_time -> kalkulasi log berdasarkan waktu
 - kita bisa mengganti label/legend pada override value lalu memilih Standard Display name
+
+postgres
+- menambahkan logging driver pada postgres container di docker-compose -> fluentd
+- perlu membuat parsers untuk memparsing log dari driver fluentd
+- jangan lupa mount volume untuk parsers.conf

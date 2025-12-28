@@ -13,7 +13,7 @@ db:
   host: 127.0.0.1
   name: db_course
   user: postgres
-  password: postgres
+  password: postgress
   port: 5432
   maxIdleConn: 10
   maxOpenConn: 20
@@ -29,4 +29,3 @@ redis:
   connPoolTimeoutSec: 1
   minIdleConn: 10
   maxIdleConn: 20
-
