@@ -2,9 +2,13 @@ package booking
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/imrenagicom/demo-app/course/catalog"
 	"github.com/imrenagicom/demo-app/internal/db"
 
@@ -60,6 +64,10 @@ func (s *Store) CreateBooking(ctx context.Context, booking *Booking, opts ...Cre
 }
 
 func (s *Store) FindBookingByID(ctx context.Context, ID string, opts ...FindOption) (*Booking, error) {
+	_, err := uuid.Parse(ID)
+	if err != nil {
+		return nil, db.ErrInvalidUuid{Message: fmt.Sprintf("invalid uuid: %s", ID)}
+	}
 	options := &FindOptions{}
 	for _, o := range opts {
 		o(options)
@@ -85,12 +93,15 @@ func (s *Store) FindBookingByID(ctx context.Context, ID string, opts ...FindOpti
 		Where(sq.Eq{"b.id": ID, "b.deleted_at": nil}).
 		PlaceholderFormat(sq.Dollar)
 
-	err := query.QueryRowContext(ctx).
+	err = query.QueryRowContext(ctx).
 		Scan(&b.ID, &b.Course.ID, &b.Batch.ID, &b.Price, &b.Currency, &b.Status,
 			&b.ReservedAt, &b.ExpiredAt, &b.PaidAt, &b.CreatedAt, &b.UpdatedAt, &b.Version,
 			&b.Customer.Name, &b.Customer.Email, &b.Customer.Phone, &b.InvoiceNumber, &b.PaymentType,
 			&b.Course.Name, &b.Course.Slug, &b.Batch.Name, &b.Batch.StartDate, &b.Batch.EndDate)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, db.ErrResourceNotFound{Message: fmt.Sprintf("booking not found: %s", ID)}
+		}
 		return nil, err
 	}
 

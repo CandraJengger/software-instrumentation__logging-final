@@ -2,9 +2,13 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
 	"github.com/imrenagicom/demo-app/internal/db"
 	"github.com/jmoiron/sqlx"
 	"github.com/redis/go-redis/v9"
@@ -77,6 +81,11 @@ func (s *Store) FindAllCourse(ctx context.Context, opts ...ListOption) ([]Course
 }
 
 func (s *Store) FindCourseByID(ctx context.Context, id string) (*Course, error) {
+	_, err := uuid.Parse(id)
+	if err != nil {
+		return nil, db.ErrInvalidUuid{Context: ctx, Message: fmt.Sprintf("invalid uuid: %s", id)}
+	}
+
 	c := Course{}
 	sb := sq.StatementBuilder.RunWith(s.dbCache)
 	getConcert := sb.
@@ -87,9 +96,9 @@ func (s *Store) FindCourseByID(ctx context.Context, id string) (*Course, error) 
 	if err := getConcert.QueryRowContext(ctx).Scan(
 		&c.ID, &c.Name, &c.Slug, &c.Description, &c.Status, &c.PublishedAt,
 	); err != nil {
-		// if errors.Is(err, sql.ErrNoRows) {
-		// 	return nil, db.ErrResourceNotFound{Message: fmt.Sprintf("course with id %s not found", id)}
-		// }
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, db.ErrResourceNotFound{Context: ctx, Message: fmt.Sprintf("course with id %s not found", id)}
+		}
 		return nil, err
 	}
 
@@ -156,6 +165,11 @@ func (c *Store) CreateCourse(ctx context.Context, course *Course) error {
 }
 
 func (c *Store) FindCourseBatchByID(ctx context.Context, id string, opts ...FindOption) (*Batch, error) {
+	_, err := uuid.Parse(id)
+	if err != nil {
+		return nil, db.ErrInvalidUuid{Context: ctx, Message: fmt.Sprintf("invalid uuid: %s", id)}
+	}
+
 	options := &FindOptions{}
 	for _, o := range opts {
 		o(options)
@@ -175,15 +189,26 @@ func (c *Store) FindCourseBatchByID(ctx context.Context, id string, opts ...Find
 		Where(sq.Eq{"id": id, "deleted_at": nil}).
 		PlaceholderFormat(sq.Dollar)
 
-	err := selectBatch.QueryRowContext(ctx).
+	err = selectBatch.QueryRowContext(ctx).
 		Scan(&b.ID, &b.Name, &b.MaxSeats, &b.AvailableSeats, &b.Price, &b.Currency, &b.StartDate, &b.EndDate, &b.Version, &b.Status)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, db.ErrResourceNotFound{Context: ctx, Message: fmt.Sprintf("batch with id %s not found", id)}
+		}
 		return nil, err
 	}
 	return &b, nil
 }
 
 func (c *Store) FindCourseBatchByIDAndCourseID(ctx context.Context, batchID, courseID string, opts ...FindOption) (*Batch, error) {
+	_, err := uuid.Parse(batchID)
+	if err != nil {
+		return nil, db.ErrInvalidUuid{Context: ctx, Message: fmt.Sprintf("invalid uuid: %s", batchID)}
+	}
+	_, err = uuid.Parse(courseID)
+	if err != nil {
+		return nil, db.ErrInvalidUuid{Context: ctx, Message: fmt.Sprintf("invalid uuid: %s", batchID)}
+	}
 	options := &FindOptions{}
 	for _, o := range opts {
 		o(options)
@@ -203,9 +228,12 @@ func (c *Store) FindCourseBatchByIDAndCourseID(ctx context.Context, batchID, cou
 		PlaceholderFormat(sq.Dollar)
 
 	var b Batch
-	err := selectBatch.QueryRowContext(ctx).
+	err = selectBatch.QueryRowContext(ctx).
 		Scan(&b.ID, &b.Name, &b.MaxSeats, &b.AvailableSeats, &b.Price, &b.Currency, &b.StartDate, &b.EndDate, &b.Version, &b.Status)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, db.ErrResourceNotFound{Context: ctx, Message: fmt.Sprintf("course batch with batch id %s and course id %s not found", batchID, courseID)}
+		}
 		return nil, err
 	}
 	return &b, nil
@@ -249,7 +277,7 @@ func (c *Store) UpdateBatchAvailableSeats(ctx context.Context, b *Batch, opts ..
 	return nil
 }
 
-func (c *Store) FindAllBatchesByCourseID(ctx context.Context, courseID string, opts ...ListOption) ([]Batch, string, error) {	
+func (c *Store) FindAllBatchesByCourseID(ctx context.Context, courseID string, opts ...ListOption) ([]Batch, string, error) {
 	options := &ListOptions{
 		Limit: 10,
 	}

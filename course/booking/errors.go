@@ -1,8 +1,10 @@
 package booking
 
 import (
+	"context"
 	"errors"
 
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -16,6 +18,7 @@ var (
 )
 
 type ErrInvalidStateChange struct {
+	Context context.Context
 	Message string
 }
 
@@ -24,5 +27,6 @@ func (e ErrInvalidStateChange) Error() string {
 }
 
 func (e ErrInvalidStateChange) GRPCStatus() *status.Status {
+	log.Ctx(e.Context).Error().Int("code", int(codes.FailedPrecondition)).Msg(e.Message)
 	return status.New(codes.FailedPrecondition, e.Error())
 }

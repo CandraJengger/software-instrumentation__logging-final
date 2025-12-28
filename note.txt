@@ -1,0 +1,13 @@
+catatan grpc-gateway
+- request id tidak bisa langsung dihubungkan dari middleware http ke grpc harus melalui metadata
+- grpc response akan secara otomatis diubah menjadi response http
+- untuk error skala database kita hanya perlu membuatnya dalam lingkup database saja
+- untuk error atau log ditekankan pada business logic
+- kita dapat menghitung duration untuk latency dari middleware http dengan kombuniasi header untuk mengambil data dari grpc method
+
+# grafana
+- sum_over_time -> kalkulasi data aktual dari log berdasarkan waktu
+- rate -> kalkulasi average per detik dari penambahan metrik berdasarkan waktu
+- sum by (label) -> kalkulasi berdasarkan label
+- count_over_time -> kalkulasi log berdasarkan waktu
+- kita bisa mengganti label/legend pada override value lalu memilih Standard Display name

@@ -9,6 +9,7 @@ import (
 
 	_ "net/http/pprof"
 
+	"github.com/google/uuid"
 	"github.com/imrenagicom/demo-app/course/booking"
 	"github.com/imrenagicom/demo-app/course/catalog"
 	bookingsrv "github.com/imrenagicom/demo-app/course/server/booking"
@@ -22,6 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 var serviceTelemetryName = "course-service"
@@ -136,9 +138,25 @@ func (s *Server) newHTTPServer(ctx context.Context) *http.Server {
 		log.Fatal().Err(err).Msgf("failed to dial grpc server: %v", err)
 	}
 
-	gwmux := runtime.NewServeMux()
-	mustRegisterGWHandler(ctx, v1.RegisterCatalogServiceHandler, gwmux, conn)
-	mustRegisterGWHandler(ctx, v1.RegisterBookingServiceHandler, gwmux, conn)
+	gwmux := runtime.NewServeMux(
+		runtime.WithMetadata(func(ctx context.Context, r *http.Request) metadata.MD {
+			md := make(map[string]string)
+			if method, ok := runtime.RPCMethod(ctx); ok {
+				md["method"] = method // /grpc.gateway.examples.internal.proto.examplepb.LoginService/Login
+			}
+			if pattern, ok := runtime.HTTPPathPattern(ctx); ok {
+				md["pattern"] = pattern // /v1/example/login
+			}
+
+			requestID := r.Header.Get("request_id")
+
+			r.Header.Set("grpc_method", md["method"])
+
+			log.Info().Str("request_id", requestID).Str("grpc_method", md["method"]).Msg("RPC Method")
+			md["request_id"] = requestID
+			return metadata.New(md)
+		}),
+	)
 
 	mux := mux.NewRouter()
 	mux.HandleFunc("/healthz", s.healthz())
@@ -147,8 +165,11 @@ func (s *Server) newHTTPServer(ctx context.Context) *http.Server {
 	mux.PathPrefix("/debug/").Handler(http.DefaultServeMux)
 
 	api := mux.PathPrefix("/api/course").Subrouter()
-	api.Use() // TODO add required middleware for /api here
+	api.Use(logMiddleware) // TODO add required middleware for /api here
 	api.PathPrefix("/v1").Handler(gwmux)
+
+	mustRegisterGWHandler(ctx, v1.RegisterCatalogServiceHandler, gwmux, conn)
+	mustRegisterGWHandler(ctx, v1.RegisterBookingServiceHandler, gwmux, conn)
 
 	sh := http.StripPrefix("/swagger/",
 		http.FileServer(http.Dir("./third_party/OpenAPI/")))
@@ -181,4 +202,49 @@ func (s *Server) readyz() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+func logMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := uuid.New().String()
+		start := time.Now()
+
+		r.Header.Set("request_id", requestID)
+		lrw := newLoggingResponseWriter(w)
+		log.Info().
+			Str("request_id", requestID).
+			Str("url", r.URL.String()).
+			Str("method", r.Method).
+			Str("IP", r.RemoteAddr).
+			Msg("request received")
+
+		next.ServeHTTP(lrw, r)
+		duration := time.Since(start).Milliseconds()
+		// 🔥 Log AFTER response is written
+		log.Info().
+			Str("request_id", requestID).
+			Str("url", r.URL.String()).
+			Str("method", r.Method).
+			Str("grpc_method", r.Header.Get("grpc_method")).
+			Int("status", lrw.statusCode).
+			Int64("duration_ms", duration).
+			Msg("request completed")
+	})
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func newLoggingResponseWriter(w http.ResponseWriter) *loggingResponseWriter {
+	return &loggingResponseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK, // default
+	}
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
 }

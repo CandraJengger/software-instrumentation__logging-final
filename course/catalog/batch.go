@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	v1 "github.com/imrenagicom/demo-app/pkg/apiclient/course/v1"
+	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -79,6 +80,7 @@ func (b *Batch) Reserve(ctx context.Context) error {
 }
 
 func (b *Batch) Available(ctx context.Context) error {
+	log.Ctx(ctx).Info().Msgf("checking availability for batch %s", b.ID.String())
 	if b.MaxSeats <= 0 {
 		return nil
 	}

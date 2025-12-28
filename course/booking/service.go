@@ -47,12 +47,15 @@ func (s Service) CreateBooking(ctx context.Context, req *v1.CreateBookingRequest
 	}
 
 	if err = batch.Available(ctx); err != nil {
-		return nil, err
+		return nil, ErrInvalidStateChange{Context: ctx, Message: err.Error()}
 	}
 
 	builder := For(course, batch)
 	if req.Booking.Customer != nil {
-		// TODO validate customer data
+
+		if req.Booking.Customer.Email == "" {
+			return nil, ErrInvalidStateChange{Context: ctx, Message: "email is required"}
+		}
 		c := req.Booking.Customer
 		builder.WithCustomer(c.Name, c.Email, c.PhoneNumber)
 	}
@@ -60,7 +63,7 @@ func (s Service) CreateBooking(ctx context.Context, req *v1.CreateBookingRequest
 
 	err = s.bookingStore.CreateBooking(ctx, b)
 	if err != nil {
-		return nil, err
+		return nil, ErrInvalidStateChange{Context: ctx, Message: err.Error()}
 	}
 	return b, nil
 }
@@ -114,7 +117,7 @@ func (s Service) reserveWithRetry(ctx context.Context, tx *sqlx.Tx, b *Booking, 
 
 	err = s.catalogStore.UpdateBatchAvailableSeats(ctx, tc, catalog.WithUpdateTx(tx))
 	if err != nil && !errors.Is(err, db.ErrNoRowUpdated) {
-		return err
+		return ErrInvalidStateChange{Context: ctx, Message: err.Error()}
 	}
 	if errors.Is(err, db.ErrNoRowUpdated) {
 		return s.reserveWithRetry(ctx, tx, b, retryCount+1)
@@ -126,43 +129,43 @@ func (s Service) GetBooking(ctx context.Context, req *v1.GetBookingRequest) (*Bo
 	return s.bookingStore.FindBookingByID(ctx, req.GetBooking())
 }
 
-func (s Service) ExpireBooking(ctx context.Context, req *v1.ExpireBookingRequest) error {
+func (s Service) ExpireBooking(ctx context.Context, req *v1.ExpireBookingRequest) (*Booking, error) {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	b, err := s.bookingStore.FindBookingByID(ctx, req.GetBooking(), WithDisableCache(), WithFindTx(tx))
 	if err != nil {
 		tx.Rollback()
-		return err
+		return nil, err
 	}
 
 	if err = b.Expire(ctx); err != nil {
 		tx.Rollback()
-		return err
+		return nil, ErrInvalidStateChange{Context: ctx, Message: err.Error()}
 	}
 
 	ctx, _ = context.WithTimeout(ctx, 5*time.Millisecond)
 	if err = s.bookingStore.UpdateBookingStatus(ctx, b, WithUpdateTx(tx)); err != nil {
 		tx.Rollback()
-		return err
+		return nil, err
 	}
 
 	if err = s.releaseBooking(ctx, tx, b, 0); err != nil {
 		tx.Rollback()
-		return err
+		return nil, err
 	}
 
 	if err = tx.Commit(); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return b, nil
 }
 
 func (s Service) releaseBooking(ctx context.Context, tx *sqlx.Tx, b *Booking, retryCount int) error {
 	if retryCount > maxReleaseAttemptRetry {
-		return ErrReleaseMaxRetryExceeded
+		return ErrInvalidStateChange{Context: ctx, Message: ErrReleaseMaxRetryExceeded.Error()}
 	}
 
 	batch, err := s.catalogStore.FindCourseBatchByIDAndCourseID(ctx, b.Batch.ID.String(), b.Course.ID.String(), catalog.WithFindTx(tx))
@@ -172,12 +175,12 @@ func (s Service) releaseBooking(ctx context.Context, tx *sqlx.Tx, b *Booking, re
 
 	err = batch.Allocate(ctx, 1)
 	if err != nil {
-		return err
+		return ErrInvalidStateChange{Context: ctx, Message: err.Error()}
 	}
 
 	err = s.catalogStore.UpdateBatchAvailableSeats(ctx, batch, catalog.WithUpdateTx(tx))
 	if err != nil && !errors.Is(err, db.ErrNoRowUpdated) {
-		return err
+		return ErrInvalidStateChange{Context: ctx, Message: err.Error()}
 	}
 	if errors.Is(err, db.ErrNoRowUpdated) {
 		return s.releaseBooking(ctx, tx, b, retryCount+1)

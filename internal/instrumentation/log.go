@@ -1,6 +1,7 @@
 package instrumentation
 
 import (
+	"context"
 	"io"
 	"os"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/imrenagicom/demo-app/internal/config"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"google.golang.org/grpc/metadata"
 )
 
 func InitializeLogger(conf config.Logging) func() {
@@ -46,4 +48,15 @@ func InitializeLogger(conf config.Logging) func() {
 			runLogFile.Close()
 		}
 	}
+}
+
+func LogWithContext(ctx context.Context) context.Context {
+	md, _ := metadata.FromIncomingContext(ctx)
+	log := log.With().
+		Str("request_id", md["request_id"][0]).
+		Str("grpc_method", md["method"][0]).
+		Logger()
+
+	ctx = log.WithContext(ctx)
+	return ctx
 }
